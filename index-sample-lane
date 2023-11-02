@@ -1,0 +1,246 @@
+
+library(getopt)
+library(dplyr)
+list_string_diff = function(a, b, exclude = c("-", "?"), ignore.case = TRUE, show.excluded = FALSE, only.position = TRUE){
+  if(nchar(a)!=nchar(b)) stop("Lengths of input strings differ")
+  if(ignore.case){
+    a = toupper(a)
+    b = toupper(b)
+  }
+
+  
+  split_seqs = strsplit(c(a, b), split = "")
+  only.diff = split_seqs[[1]] != split_seqs[[2]]
+  only.diff[
+    (split_seqs[[1]] %in% exclude) |
+      (split_seqs[[2]] %in% exclude)
+    ] = NA
+  
+  diff.info = data.frame(which(is.na(only.diff)|only.diff),
+                         split_seqs[[1]][only.diff], split_seqs[[2]][only.diff])
+  names(diff.info) = c("position", "seq.a", "seq.b")
+  
+  if(!show.excluded) diff.info = na.omit(diff.info)
+  if(only.position){
+    diff.info$position
+  }else diff.info
+}
+
+spec <- matrix(
+  c("sample_sheet",  "sp", 1, "character", "This is a sample_sheet path",
+    "out", "o", 1, "character",  "This is output path",
+    "help", "h", 0, "character",  "This is a index check",
+     "out2","Ou",1,"character","This is a failed sample pair",
+     "Gb","G",1,"integer","The size of lanes",
+     "Gb2","G2",1,"integer","The size for recycle"),
+  byrow=TRUE, ncol=5)
+opt <- getopt(spec=spec)
+
+if( !is.null(opt$help) || is.null(opt$sample_sheet) || is.null(opt$out)||is.null(opt$out2) || is.null(opt$Gb)||is.null(opt$Gb2)){
+    cat(paste(getopt(spec=spec, usage = T), "\n"))
+    quit()
+}
+
+sample<-read.table(opt$sample_sheet,na.strings="",check.names=F,fill=T,head=T)
+sample
+
+print("Start")
+
+sample_index_check<-function(sample){
+  n<-length(sample$I7Index序列)-1
+  index_check<-data.frame()
+  for (i in c(1:n)) {
+    m<-length(sample$I7Index序列)-i
+    for (j in c(1:m)) {
+      if ((is.na(sample$I5Index序列[i])|is.na(sample$I5Index序列[i+j]))==F){
+        I5long1<-nchar(sample$I5Index序列[i])
+        I5long2<-nchar(sample$I5Index序列[i+j])
+        I7long1<-nchar(sample$I7Index序列[i])
+        I7long2<-nchar(sample$I7Index序列[i+j])
+        I5min<-min(I5long1,I5long2)
+        I7min<-min(I7long1,I7long2)
+        I5index1<-substr(sample$I5Index序列[i],1,I5min)
+        I5index2<-substr(sample$I5Index序列[i+j],1,I5min)
+        I7index1<-substr(sample$I7Index序列[i],1,I7min)
+        I7index2<-substr(sample$I7Index序列[i+j],1,I7min)
+        k<-length(list_string_diff(I5index1,I5index2))
+        k1<-length(list_string_diff(I7index1,I7index2))
+        pair<-data.frame(A=sample$样品名称[i],B=sample$样品名称[i+j],i7_mismatch=k1,i5_mismatch=k)
+        index_check<-rbind(index_check,pair)
+
+      } else if (is.na(sample$I5Index序列[i])|is.na(sample$I5Index序列[i+j])){
+	      I7long1<-nchar(sample$I7Index序列[i])
+        I7long2<-nchar(sample$I7Index序列[i+j])
+	      I7min<-min(I7long1,I7long2)
+	      I7index1<-substr(sample$I7Index序列[i],1,I7min)
+        I7index2<-substr(sample$I7Index序列[i+j],1,I7min)
+        k1<-length(list_string_diff(I7index1,I7index2))
+        pair<-data.frame(A=sample$样品名称[i],B=sample$样品名称[i+j],i7_mismatch=k1,i5_mismatch=20)
+        index_check<-rbind(index_check,pair)
+      }
+
+    }
+  }
+
+  err=0
+  err2=0
+  pair_fail_2<-data.frame(A="N_A",B="N_A",i7_mismatch=0,i5_mismatch=0)
+  index_check2<-index_check[,c(3,4)]
+  for ( i in c(1:nrow(index_check2))){
+    if (index_check2[i,][2]!=20){
+        if (all(index_check2[i,]<3)){
+            err=1
+	    pair_fail_1<-data.frame(A=index_check$A[i],B=index_check$B[i],i7_mismatch=index_check2[i,][1],
+					i5_mismatch=index_check2[i,][2])
+	    pair_fail_2<-rbind(pair_fail_2,pair_fail_1)
+        } else {
+            err1=0
+        }
+    } else if (index_check2[i,][2]==20){
+        if (any(index_check2[i,]<3)){
+            err2=2
+	          pair_fail_1<-data.frame(A=index_check$A[i],B=index_check$B[i],i7_mismatch=index_check2[i,][1],
+                                        i5_mismatch=index_check2[i,][2])
+            pair_fail_2<-rbind(pair_fail_2,pair_fail_1)
+        } else{
+            err3=0
+        }
+    }
+  }
+
+  if (any(c(err,err2)>0)){
+    print("Fail")
+  } else {
+    print("OK")
+  }
+  pair_fail_2<-na.omit(pair_fail_2)
+  final_name<-pair_fail_2$B
+  success_name<-setdiff(sample$样品名称,final_name)
+  success_name<-data.frame(样品名称=success_name)
+  success_name<-left_join(success_name,sample,by="样品名称")
+  fail_name<-setdiff(sample$样品名称,success_name$样品名称)
+  fail_name<-data.frame(样品名称=fail_name)
+  fail_name<-left_join(fail_name,sample,by="样品名称")
+  return(list(success_name,fail_name))
+}
+
+print("data preparation")
+print("####################")
+name1<-sample$样品名称[nrow(sample)]
+success_name_2<-data.frame()
+i=0
+i1=0
+name2<-"MKL"
+print("sample_lane")
+for (m in c(1:999)){
+  s=0
+  s1=0
+  rm(i)
+  rm(i1)
+  m_name<-paste0("Processing ",m,"th lane sample")
+  print(m_name)
+    if (name1!=name2){
+    k=nrow(sample)
+    for (i in c(1:k)){
+        s<-s+sample$目标数据量[i]
+        if (s>=opt$Gb) {
+            break;
+        }
+    }
+    sample_1<-sample[c(1:i),]
+    result<-sample_index_check(sample_1)
+    success_name<-result[[1]]
+    success_name$lane<-m
+    success_name_2<-rbind(success_name_2,success_name)
+    sample_name<-setdiff(sample$样品名称,success_name$样品名称)
+    sample<-sample[sample$样品名称%in%sample_name,]
+    print(sample)
+    k=nrow(sample)
+    for (i1 in c(1:k)){
+        s1<-s1+sample$目标数据量[i1]
+        if (s1>=opt$Gb) {
+            break;
+        }
+    }
+    name2<-sample$样品名称[i1]
+    print(name2)
+    }else{
+        break;
+    }
+}
+
+success_name_3<-data.frame()
+s3=0
+result_2<-sample_index_check(sample)
+success_name<-result_2[[1]]
+success_name$lane<-m
+success_name_2<-rbind(success_name_2,success_name)
+fail_name<-result_2[[2]]
+
+if (nrow(fail_name)==0){
+  lane_check_2<-max(unique(success_name_2$lane))
+  print("####################")
+  print("Checking")
+  for (i5 in c(1:lane_check_2)){
+  print("check")
+  sample_6<-success_name_2[success_name_2$lane%in%i5,]
+  sample_index_check(sample_6)
+  success_name_2_lane_size<-sum(sample_6$目标数据量)
+  print(success_name_2_lane_size)
+  }
+
+
+  write.table(success_name_2,opt$out,sep ="\t", row.names =F, col.names =TRUE, quote =F)
+} else {
+
+  fail_name$lane<-111
+  m2<-m-1
+  print("####################")
+  print("Sample recycling")
+  sample_7<-read.table(opt$sample_sheet,na.strings="",check.names=F,fill=T,head=T)
+  sample_7$lane<-111
+  for (i2 in c(1:m2)){
+    
+    re_sample<-paste0("Retrieved ",i2,"th sample")
+    print(re_sample)
+    rm(i3)
+    s3=0
+    sample<-success_name_2[success_name_2$lane%in%i2,]
+    sample<-rbind(sample,fail_name)
+    k<-nrow(sample)
+    for (i3 in c(1:k)){
+      s3<-s3+sample$目标数据量[i3]
+      if (s3>=opt$Gb2) {
+        break;
+      }
+    }
+    sample_1<-sample[c(1:i3),]
+    result_3<-sample_index_check(sample_1)
+    success_name<-result_3[[1]]
+    fail_name<-result_3[[2]]
+    success_name$lane<-i2
+    
+    success_name_3<-rbind(success_name_3,success_name)
+    name_sum<-c(success_name_2$样品名称,success_name_3$样品名称)
+    fail_name_sum<-setdiff(sample_7$样品名称,name_sum)
+    fail_name<-sample_7[sample_7$样品名称%in%fail_name_sum,]
+
+  }
+  success_name_m<- success_name_2[success_name_2$lane%in%m,]
+  success_name_final<-rbind(success_name_3,success_name_m)
+  lane_check<-max(unique(success_name_final$lane))
+  print("####################")
+  print("Checking")
+  for (i4 in c(1:lane_check)){
+    print("check")
+    sample_5<-success_name_final[success_name_final$lane%in%i4,]
+    sample_index_check(sample_5)
+    success_name_final_lane_size<-sum(sample_5$目标数据量)
+    print(success_name_final_lane_size)
+
+  }
+  write.table(success_name_final,opt$out,sep ="\t", row.names =F, col.names =TRUE, quote =F)
+}
+print("####################")
+print("Sample lane end")
+
